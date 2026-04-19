@@ -579,7 +579,7 @@ def AddRoutingBlock(name, Sink):
     tk.Button(SRow, text="Attach", width=6, command=lambda: OpenAddSourcePopup(name, Sink))\
     .grid(row=0, column=0, sticky="ew")
 
-    tk.Button(SRow, text="Remove", width=6, command=lambda: OpenRemoveSourcePopup(name, Sink))\
+    tk.Button(SRow, text="Remove", width=6, command=lambda: OpenRemoveSourcePopup(Sink))\
     .grid(row=0, column=1, padx=(5,0), sticky="ew")
 
     InnerFrameS = tk.Frame(SRow, bd=1, relief="solid")
@@ -590,7 +590,7 @@ def AddRoutingBlock(name, Sink):
 
     tk.Label(
         InnerFrameS,
-        text = "\n".join(Sink["Sources"]) if Sink["Sources"] else "",
+        text = ", ".join(Sink["Sources"]) if Sink["Sources"] else "",
         anchor="nw",
         justify="left"
     ).grid(row=0, column=0, sticky="nsew")
