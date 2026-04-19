@@ -1,0 +1,44 @@
+This was built and tested on **Linux Mint 22.1**.
+On Mint, it should run without issues.
+
+---
+
+If you're NOT on Linux Mint:
+
+This program relies on:
+
+* PipeWire
+* X11 (most likely)
+* AppIndicator (for tray icon)
+
+It *should* work on other Debian-based systems, but:
+
+* GNOME (Ubuntu) may require extra setup for tray support
+* No guarantees outside Mint
+
+---
+
+If you're on Arch?
+
+You already made your choice. Figure it out 🤷
+
+---
+
+## Installation
+
+Open a terminal in this folder and run:
+
+chmod +x InstallNullWire.sh
+
+Press enter — nothing visible will happen (that's normal).
+
+Then run:
+
+./InstallNullWire.sh
+
+It may ask for your sudo password to install required dependencies.
+
+---
+
+If you're looking for an equalizer/audio effects type system? This aint it.
+Get EasyEffects for that after setting this up.
