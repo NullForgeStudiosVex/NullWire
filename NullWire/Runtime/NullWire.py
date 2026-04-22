@@ -161,6 +161,11 @@ def RefreshOutputDevices():
     except:
         OutputDevices = []
         return
+    
+    used_ids = set()
+    for slot in Devices["A"].values():
+        if slot and "ID" in slot:
+            used_ids.add(slot["ID"])
 
     devices = []
     current = {}
@@ -175,7 +180,8 @@ def RefreshOutputDevices():
             current["UIName"] = line.split(":", 1)[1].strip()
 
             if "SystemID" in current:
-                if current["SystemID"] not in Sinks:
+                #if current["SystemID"] not in Sinks:
+                if current["SystemID"] not in used_ids:
                     devices.append(current)
                 current = {}
 
@@ -189,6 +195,11 @@ def RefreshInputDevices():
     except:
         InputDevices = []
         return
+    
+    used_ids = set()
+    for slot in Devices["M"].values():
+        if slot and "ID" in slot:
+            used_ids.add(slot["ID"])
 
     devices = []
     current = {}
@@ -203,7 +214,7 @@ def RefreshInputDevices():
             current["UIName"] = line.split(":", 1)[1].strip()
 
             if "SystemID" in current:
-                if ".monitor" not in current["SystemID"]:
+                if ".monitor" not in current["SystemID"] and current["SystemID"] not in used_ids:
                     devices.append(current)
                 current = {}
 
@@ -232,6 +243,65 @@ def GetAudioSources():
                 sources.append(name)
 
     return sources
+
+def GetAudioDeviceVolume(DeviceID):
+    try:
+        out = subprocess.check_output(
+            ["pactl", "get-sink-volume", DeviceID]
+        ).decode()
+
+        for part in out.split():
+            if "%" in part:
+                return int(part.replace("%", ""))
+    except:
+        pass
+
+    return 0
+
+def GetMicrophoneVolume(source):
+    try:
+        out = subprocess.check_output(
+            ["pactl", "get-source-volume", source]
+        ).decode()
+
+        for part in out.split():
+            if "%" in part:
+                return int(part.replace("%", ""))
+    except:
+        pass
+
+    return 0
+
+def GetSinkVolume(name):
+    try:
+        out = subprocess.check_output(
+            ["pactl", "get-sink-volume", name]
+        ).decode()
+
+        for part in out.split():
+            if "%" in part:
+                return int(part.replace("%", ""))
+    except:
+        return None
+
+def ResolveSinkID(name):
+    for d in OutputDevices:
+        if d["UIName"] == name:
+            return d["SystemID"]
+    return None
+
+def ResolveSourceID(target_name):
+    out = subprocess.check_output(["pactl", "list", "short", "sources"]).decode()
+
+    for line in out.splitlines():
+        parts = line.split()
+        idx = parts[0]
+        name = parts[1]
+
+        if target_name in name:
+            return idx
+
+    return None
 
 # ==============================
 # UI
@@ -342,7 +412,8 @@ def AddRoutingObject():
         "Mono": False,
         "Outputs": {f"A{i}": False for i in range(1, 21)},
         "Inputs":  {f"M{i}": False for i in range(1, 21)},
-        "Sources": []
+        "Sources": [],
+        "Volume": 100,
     }
     
 
@@ -358,6 +429,7 @@ def AddRoutingObject():
     RoutingEntry.delete(0, tk.END)
 
 AddButton.config(command=AddRoutingObject)
+
 def AddRoutingBlock(name, Sink):
     Frame = tk.Frame(RoutingObjects, bd=2, relief="solid")
     Frame.pack(fill="x", padx=5, pady=5)
@@ -365,9 +437,9 @@ def AddRoutingBlock(name, Sink):
     # ==============================
     # GRID SETUP
     # ==============================
-    Frame.columnconfigure(0, weight=0)  # Button 1
-    Frame.columnconfigure(1, weight=0)  # Button2/Spacer
-    Frame.columnconfigure(2, weight=1)  # InfoField
+    Frame.columnconfigure(0, weight=1)  # Button 1
+    #Frame.columnconfigure(1, weight=0)  # Button2/Spacer
+    #Frame.columnconfigure(2, weight=1)  # InfoField
 
     Frame.rowconfigure(0, weight=1)  # TOP SECTION
     Frame.rowconfigure(1, weight=1)  # DIVIDER
@@ -397,8 +469,9 @@ def AddRoutingBlock(name, Sink):
     Column0.grid(row=0, column=0, sticky="ew", padx=5)
 
     Column0.columnconfigure(0, weight=0)  # Delete
-    Column0.columnconfigure(1, weight=0)  # InnerFrame expands.
-    Column0.columnconfigure(2, weight=1)  # InnerFrame expands
+    Column0.columnconfigure(1, weight=0)  # Mono
+    Column0.columnconfigure(2, weight=2)  # label
+    Column0.columnconfigure(3, weight=1)  # Volume
 
     tk.Button(Column0, text="Delete", command=Delete)\
         .grid(row=0, column=0, padx=5, pady=5, sticky="w")
@@ -413,7 +486,58 @@ def AddRoutingBlock(name, Sink):
     InnerFrame.columnconfigure(0, weight=1)
 
     tk.Label(InnerFrame, text=name, anchor="w")\
-    .grid(row=0, column=2, sticky="ew")
+    .grid(row=0, column=0, sticky="ew")
+
+    volume_frame = tk.Frame(Column0)
+    volume_frame.grid(row=0, column=3, sticky="ew", padx=5)
+    volume_frame.columnconfigure(0, weight=1)
+
+    start_vol = Sink.get("Volume", 100)
+    vol_var = tk.StringVar(value=str(start_vol))
+
+    after_id = None
+
+    def ApplyVolume():
+        volumenumber = scale.get()
+        Sink["Volume"] = volumenumber
+        SaveConfig()
+
+        subprocess.run([
+            "./NW.sh",
+            "SetSinkVolume",
+            name,
+            str(volumenumber)
+        ])
+
+    def ScheduleApply():
+        nonlocal after_id
+        if after_id:
+            Root.after_cancel(after_id)
+        after_id = Root.after(150, ApplyVolume)
+
+    def OnVolumeChange(val):
+        vol_var.set(str(int(float(val))))
+
+    scale = tk.Scale(
+    volume_frame,
+    from_=0,
+    to=150,
+    orient="horizontal",
+    showvalue=0,
+    #length=600,
+    #sliderlength=10,
+    command=OnVolumeChange
+    )
+    scale.grid(row=0, column=0, sticky="ew")
+
+    scale.bind("<ButtonRelease-1>", lambda e: ApplyVolume())
+    scale.bind("<Button-4>", lambda e: (scale.set(min(150, scale.get()+5)), ScheduleApply()))
+    scale.bind("<Button-5>", lambda e: (scale.set(max(0, scale.get()-5)), ScheduleApply()))
+
+    scale.set(start_vol)
+
+    tk.Label(volume_frame, textvariable=vol_var, width=3)\
+    .grid(row=0, column=1, padx=5)
 
     # ==============================
     # THICK DIVIDER
@@ -435,6 +559,9 @@ def AddRoutingBlock(name, Sink):
         RowA.columnconfigure(i, weight=1)
         enabled = IsOutputEnabled(Sink, device)
         var = tk.BooleanVar(value=enabled)
+
+        is_active = IsOutputEnabled(Sink, device)
+        exists = Devices["A"].get(device) is not None
         
 
         def Toggle(d=device, v=var):
@@ -466,16 +593,107 @@ def AddRoutingBlock(name, Sink):
 
             SaveConfig()
 
-        tk.Checkbutton(
-            RowA,
-            text=device,
-            variable=var,
-            width = 3,
-            command=Toggle,
-            anchor="w"
-        ).grid(row=0, column=i, sticky="ew", padx=2, pady=2)
+        cb = tk.Checkbutton(
+        RowA,
+        text=device,
+        variable=var,
+        width=3,
+        command=Toggle,
+        anchor="w"
+        )
+        cb.grid(row=0, column=i, sticky="ew", padx=2, pady=2)
+
+        if not exists:
+            cb.config(state="disabled")
 
         
+    
+    # ==============================
+    # MIC DEVICES ROW
+    # ==============================
+    RowM = tk.Frame(Frame)
+    RowM.grid(row=3, column=0, columnspan=3, sticky="ew", padx=5)
+    RowM.columnconfigure(0, weight=1)
+
+    # ------------------------------
+    # BUILD TOGGLES
+    # ------------------------------
+    AllMics = [f"M{i}" for i in range(1, 21)]
+
+    for i, device in enumerate(AllMics):
+        RowM.columnconfigure(i, weight=1)
+
+        is_active = IsInputEnabled(Sink, device)
+        var = tk.BooleanVar(value=is_active)
+
+        DeviceData = Devices["M"].get(device)
+        exists = DeviceData is not None
+
+        def Toggle(d=device, v=var):
+            DeviceID = Devices["M"][d]["ID"]
+
+            if v.get():
+                subprocess.run([
+                    "./NW.sh",
+                    "ConnectMicToSink",
+                    DeviceID,
+                    name
+                ])
+                Sink["Inputs"][d] = True
+            else:
+                subprocess.run([
+                    "./NW.sh",
+                    "RemoveMicFromSink",
+                    DeviceID,
+                    name
+                ])
+                Sink["Inputs"][d] = False
+            SaveConfig()
+
+        cb = tk.Checkbutton(
+            RowM,
+            text=device,
+            variable=var,
+            width=3,
+            command=Toggle,
+            anchor="w"
+        )
+        cb.grid(row=0, column=i, sticky="ew", padx=2, pady=2)
+
+        if not exists:
+            cb.config(state="disabled")
+
+    # ==============================
+    # SOURCES ROW
+    # ==============================
+    SRow = tk.Frame(Frame)
+    SRow.grid(row=4, column=0, columnspan=3, sticky="ew", padx=5)
+
+    SRow.columnconfigure(2, weight=1)
+
+    tk.Button(SRow, text="Attach", width=6, command=lambda: OpenAddSourcePopup(name, Sink))\
+    .grid(row=0, column=0, sticky="ew")
+
+    tk.Button(SRow, text="Remove", width=6, command=lambda: OpenRemoveSourcePopup(Sink))\
+    .grid(row=0, column=1, padx=(5,0), sticky="ew")
+
+    InnerFrameS = tk.Frame(SRow, bd=1, relief="solid")
+    InnerFrameS.grid(row=0, column=2, sticky="nsew", padx=5)
+
+    InnerFrameS.columnconfigure(0, weight=1)
+    InnerFrameS.rowconfigure(0, weight=1)
+
+    tk.Label(
+        InnerFrameS,
+        text = ", ".join(Sink["Sources"]) if Sink["Sources"] else "",
+        anchor="nw",
+        justify="left"
+    ).grid(row=0, column=0, sticky="nsew")
+
+    # ==============================
+    # Mono cause why not
+    # ==============================
+
     def ToggleMono():
         Sink["Mono"] = MonoVar.get()
         for d, enabled in Sink["Outputs"].items():
@@ -514,86 +732,6 @@ def AddRoutingBlock(name, Sink):
         command=ToggleMono)\
         .grid(row=0, column=1, padx=5, pady=5, sticky="w")
     
-    # ==============================
-    # MIC DEVICES ROW
-    # ==============================
-    RowM = tk.Frame(Frame)
-    RowM.grid(row=3, column=0, columnspan=3, sticky="ew", padx=5)
-    RowM.columnconfigure(0, weight=1)
-
-    # ------------------------------
-    # BUILD TOGGLES
-    # ------------------------------
-    AllMics = [f"M{i}" for i in range(1, 21)]
-
-    for i, device in enumerate(AllMics):
-        RowM.columnconfigure(i, weight=1)
-        enabled = IsInputEnabled(Sink, device)
-
-        var = tk.BooleanVar(value=enabled)
-
-        def Toggle(d=device, v=var):
-            DeviceData = Devices["M"].get(d)
-            if not DeviceData:
-                v.set(False)
-                Sink["Inputs"][d] = False
-                SaveConfig()
-                return
-            DeviceID = DeviceData["ID"]
-            if v.get():
-                subprocess.run([
-                    "./NW.sh",
-                    "ConnectMicToSink",
-                    DeviceID,
-                    name
-                ])
-                Sink["Inputs"][d] = True
-            else:
-                subprocess.run([
-                    "./NW.sh",
-                    "RemoveMicFromSink",
-                    DeviceID,
-                    name
-                ])
-                Sink["Inputs"][d] = False
-
-            SaveConfig()
-
-        tk.Checkbutton(
-            RowM,
-            text=device,
-            variable=var,
-            width = 3,
-            command=Toggle,
-            anchor="w"
-        ).grid(row=0, column=i, sticky="ew", padx=2, pady=2)
-
-    # ==============================
-    # SOURCES ROW
-    # ==============================
-    SRow = tk.Frame(Frame)
-    SRow.grid(row=4, column=0, columnspan=3, sticky="ew", padx=5)
-
-    SRow.columnconfigure(2, weight=1)
-
-    tk.Button(SRow, text="Attach", width=6, command=lambda: OpenAddSourcePopup(name, Sink))\
-    .grid(row=0, column=0, sticky="ew")
-
-    tk.Button(SRow, text="Remove", width=6, command=lambda: OpenRemoveSourcePopup(Sink))\
-    .grid(row=0, column=1, padx=(5,0), sticky="ew")
-
-    InnerFrameS = tk.Frame(SRow, bd=1, relief="solid")
-    InnerFrameS.grid(row=0, column=2, sticky="nsew", padx=5)
-
-    InnerFrameS.columnconfigure(0, weight=1)
-    InnerFrameS.rowconfigure(0, weight=1)
-
-    tk.Label(
-        InnerFrameS,
-        text = ", ".join(Sink["Sources"]) if Sink["Sources"] else "",
-        anchor="nw",
-        justify="left"
-    ).grid(row=0, column=0, sticky="nsew")
 
 
 
@@ -718,12 +856,14 @@ RightColumn = tk.Frame(MainRow)
 RightColumn.grid(row=0, column=2, sticky="nsew", padx=(2, 5))
 
 
+
 def CreateABlock(i):
     frame = tk.Frame(LeftColumn, bd=1, relief="solid")
     frame.pack(fill="x", pady=2)
 
     frame.columnconfigure(0, weight=1)
     frame.columnconfigure(1, weight=0)
+    frame.columnconfigure(2, weight=0)
 
     AKey = f"A{i}"
     data = Devices["A"][AKey]
@@ -737,10 +877,138 @@ def CreateABlock(i):
 
     tk.Label(container, text=f"{AKey}: {name}", anchor="w")\
         .grid(row=0, column=0, sticky="w")
+    
+    volume = tk.Frame(frame)
+    volume.grid(row=0, column=1, sticky="e", padx=5)
+
+    volume_controls = tk.Frame(volume)
+    volume_controls.grid(row=0, column=0)
+
+    device_id = data["ID"] if data else None
+    start_vol = data.get("Volume") if data else None
+
+    if start_vol is None:
+        start_vol = GetAudioDeviceVolume(device_id) if device_id else 100
+
+    vol_var = tk.StringVar(value=str(start_vol))
+
+    after_id = None
+
+    def ApplyVolume(data):
+        if not data:
+            return
+
+        volumenumber = data.get("Volume", 100)
+
+        device_id = data.get("ID")
+
+        # 🔥 try to resolve if missing
+        if not device_id:
+            device_id = ResolveSinkID(data["Name"])
+
+        if not device_id:
+            return
+
+        data["ID"] = device_id
+
+        try:
+            subprocess.run([
+                "pactl",
+                "set-sink-volume",
+                device_id,
+                f"{volumenumber}%"
+            ], check=True)
+
+        except subprocess.CalledProcessError:
+            # 🔥 ID probably changed → re-resolve
+            new_id = ResolveSinkID(data["Name"])
+
+            if not new_id:
+                return
+
+            data["ID"] = new_id
+            SaveConfig()
+
+            subprocess.run([
+                "pactl",
+                "set-sink-volume",
+                new_id,
+                f"{volumenumber}%"
+            ], check=True)
+
+    def ScheduleApply():
+        nonlocal after_id
+
+        if after_id:
+            Root.after_cancel(after_id)
+
+        after_id = Root.after(150, ApplyVolume)
+
+    def OnVolumeChange(val):
+        volumenumber = int(float(val))
+        vol_var.set(str(volumenumber))
+
+    scale = tk.Scale(
+        volume_controls,
+        from_=0,
+        to=150,
+        orient="horizontal",
+        showvalue=0,
+        length=120,
+        sliderlength=10,
+        command=OnVolumeChange
+    )
+    scale.grid(row=0, column=0, sticky="e", padx=5)
+
+    def OnScrollUp(event):
+        scale.set(min(150, scale.get() + 5))
+        OnVolumeChange(scale.get())
+        ScheduleApply()
+
+    def OnScrollDown(event):
+        scale.set(max(0, scale.get() - 5))
+        OnVolumeChange(scale.get())
+        ScheduleApply()
+
+    scale.bind("<ButtonRelease-1>", lambda e: ApplyVolume())
+    scale.bind("<Button-4>", OnScrollUp)
+    scale.bind("<Button-5>", OnScrollDown)
+
+    scale.set(start_vol)
+
+    override_var = tk.BooleanVar(value=data.get("Dominant", False) if data else False)
+
+    def ToggleOverride():
+        state = override_var.get()
+
+        data["Dominant"] = state
+        SaveConfig()
+        if state:
+            volume_controls.grid()
+        else:
+            volume_controls.grid_remove()
+
+    tk.Label(volume_controls, textvariable=vol_var, anchor="w", width= 3)\
+        .grid(row=0, column=1, sticky="w")
+
+    tk.Checkbutton(
+            volume,
+            text="Override System",
+            width = 15,
+            variable=override_var,
+            command=ToggleOverride,
+            anchor="w"
+        ).grid(row=0, column=2, sticky="e", padx=1, pady=2)
+    
+    if override_var.get():
+        volume_controls.grid()
+    else:
+        volume_controls.grid_remove()
+
 
     # buttons
     btns = tk.Frame(frame)
-    btns.grid(row=0, column=1)
+    btns.grid(row=0, column=2)
 
     tk.Button(btns, text="SET",
         command=lambda k=AKey: OpenOutputPopup(k)).pack(side="left")
@@ -754,11 +1022,13 @@ def CreateMBlock(i):
 
     frame.columnconfigure(0, weight=1)
     frame.columnconfigure(1, weight=0)
+    frame.columnconfigure(2, weight=0)
 
     MKey = f"M{i}"
     data = Devices["M"][MKey]
     name = data["Name"] if data else "-"
 
+    # label
     container = tk.Frame(frame)
     container.grid(row=0, column=0, sticky="nsew", padx=5)
     container.columnconfigure(0, weight=1)
@@ -767,14 +1037,144 @@ def CreateMBlock(i):
     tk.Label(container, text=f"{MKey}: {name}", anchor="w")\
         .grid(row=0, column=0, sticky="w")
 
+    volume = tk.Frame(frame)
+    volume.grid(row=0, column=1, sticky="e", padx=5)
+
+    volume_controls = tk.Frame(volume)
+    volume_controls.grid(row=0, column=0)
+
+    device_id = data["ID"] if data else None
+    start_vol = data.get("Volume") if data else None
+
+    if start_vol is None:
+        start_vol = GetMicrophoneVolume(device_id) if device_id else 100
+
+    vol_var = tk.StringVar(value=str(start_vol))
+
+    after_id = None
+
+    def ApplyVolume():
+        if not data:
+            return
+
+        volumenumber = scale.get()
+        data["Volume"] = volumenumber
+        SaveConfig()
+
+        device_id = data.get("ID")
+
+        if not device_id:
+            device_id = ResolveSourceID(data["Name"])
+        
+        if not device_id:
+            return
+        
+        data["ID"] = device_id
+
+        try:
+            subprocess.run([
+                "pactl",
+                "set-source-volume",
+                device_id,
+                f"{volumenumber}%"
+            ], check=True)
+
+        except subprocess.CalledProcessError:
+            new_id = ResolveSourceID(data["Name"])
+
+            if not new_id:
+                return
+
+            data["ID"] = new_id
+            SaveConfig()
+
+            subprocess.run([
+                "pactl",
+                "set-source-volume",
+                new_id,
+                f"{volumenumber}%"
+            ], check=True)
+
+    def ScheduleApply():
+        nonlocal after_id
+        if after_id:
+            Root.after_cancel(after_id)
+        after_id = Root.after(150, ApplyVolume)
+
+    def OnVolumeChange(val):
+        volumenumber = int(float(val))
+        vol_var.set(str(volumenumber))
+
+    scale = tk.Scale(
+        volume_controls,
+        from_=0,
+        to=150,
+        orient="horizontal",
+        showvalue=0,
+        length=120,
+        sliderlength=10,
+        command=OnVolumeChange
+    )
+    scale.grid(row=0, column=0, sticky="e", padx=5)
+
+    def OnScrollUp(event):
+        scale.set(min(150, scale.get() + 5))
+        OnVolumeChange(scale.get())
+        ScheduleApply()
+
+    def OnScrollDown(event):
+        scale.set(max(0, scale.get() - 5))
+        OnVolumeChange(scale.get())
+        ScheduleApply()
+
+    scale.bind("<ButtonRelease-1>", lambda e: ApplyVolume())
+    scale.bind("<Button-4>", OnScrollUp)
+    scale.bind("<Button-5>", OnScrollDown)
+
+    scale.set(start_vol)
+
+    override_var = tk.BooleanVar(value=data.get("Dominant", False) if data else False)
+
+    def ToggleOverride():
+        if not data:
+            return
+
+        state = override_var.get()
+        data["Dominant"] = state
+        SaveConfig()
+
+        if state:
+            volume_controls.grid()
+        else:
+            volume_controls.grid_remove()
+
+    tk.Label(volume_controls, textvariable=vol_var, width=3)\
+        .grid(row=0, column=1, sticky="w")
+
+    tk.Checkbutton(
+        volume,
+        text="Override System",
+        width=15,
+        variable=override_var,
+        command=ToggleOverride,
+        anchor="w"
+    ).grid(row=0, column=2, sticky="e", padx=1, pady=2)
+
+    if override_var.get():
+        volume_controls.grid()
+    else:
+        volume_controls.grid_remove()
+
+    # buttons
     btns = tk.Frame(frame)
-    btns.grid(row=0, column=1)
+    btns.grid(row=0, column=2)
 
     tk.Button(btns, text="SET",
         command=lambda k=MKey: OpenInputPopup(k)).pack(side="left")
 
     tk.Button(btns, text="CLEAR",
         command=lambda k=MKey: ClearInput(k)).pack(side="left")
+    
 
 def BuildUI():
     for i in range(1, 21):
@@ -825,7 +1225,9 @@ def OpenOutputPopup(targetKey):
 def SelectOutputDevice(device, key, Popup):
     Devices["A"][key] = {
         "Name": device["UIName"],
-        "ID": device["SystemID"]
+        "ID": device["SystemID"],
+        "Volume": 100,
+        "Dominant": False
     }
 
     RebuildUI()
@@ -850,7 +1252,9 @@ def OpenInputPopup(targetKey):
 def SelectInputDevice(device, key, Popup):
     Devices["M"][key] = {
         "Name": device["UIName"],
-        "ID": device["SystemID"]
+        "ID": device["SystemID"],
+        "Volume": 100,
+        "Dominant": False
     }
     SaveConfig()
     RebuildUI()
@@ -874,13 +1278,23 @@ def ApplyOutputs():
 
             device = Devices["A"].get(d)
             if not device:
+                print(f"Audio Device not found for {device['Name']}")
                 continue
+
+            device_id = ResolveSinkID(device["Name"])
+            if not device_id:
+                print(f"Audio Device ID not found for {device['Name']}")
+                continue
+
+            if device["ID"] != device_id:
+                device["ID"] = device_id
+                SaveConfig()
 
             subprocess.run([
                 "./NW.sh",
                 "ConnectSinkToAux",
                 name,
-                device["ID"],
+                device_id,
                 str(int(sink["Mono"]))
             ])
 
@@ -894,11 +1308,69 @@ def ApplyInputs():
             if not device:
                 continue
 
+            device_id = ResolveSourceID(device["Name"])
+            if device["ID"] != device_id:
+                device["ID"] = device_id
+                SaveConfig()
+
             subprocess.run([
                 "./NW.sh",
                 "ConnectMicToSink",
                 name,
-                device["ID"],
+                device_id,
+            ])
+
+def GetSinkVolume(sink):
+    try:
+        out = subprocess.check_output(
+            ["pactl", "get-sink-volume", sink]
+        ).decode()
+
+        for part in out.split():
+            if "%" in part:
+                return int(part.replace("%", ""))
+    except:
+        pass
+
+    return None
+
+def ApplyDominantVolumes():
+    for name, sink in Sinks.items():
+        if not sink.get("Dominant"):
+            continue
+
+        target = int(sink.get("Volume", 1.0) * 100)
+        current = GetSinkVolume(name)
+
+        if current is None:
+            continue
+
+        # only correct if drifted (prevents spam)
+        if abs(current - target) > 2:
+            subprocess.run([
+                "pactl", "set-sink-volume",
+                name,
+                f"{target}%"
+            ])
+
+def EnforceSinkVolumes():
+    for name, sink in Sinks.items():
+        target = sink.get("Volume")
+        if target is None:
+            continue
+
+        current = GetSinkVolume(name)
+        if current is None:
+            continue
+
+        if abs(current - target) > 2:
+            print(f"Fixing volume for {name}: {current} → {target}")
+
+            subprocess.run([
+                "./NW.sh",
+                "SetSinkVolume",
+                name,
+                str(target)
             ])
 
 # ==============================
@@ -908,7 +1380,6 @@ def Startup():
     for name, sink in Sinks.items():
         # create sink
         subprocess.run(["./NW.sh", "CreateSink", name])
-
         # outputs
         for d, enabled in sink["Outputs"].items():
 
@@ -952,6 +1423,7 @@ subprocess.run(["./NW.sh", "ClearSinks"])
 LoadConfig()
 Startup()
 RebuildUI()
+time.sleep(1)
 RefreshRoutingUI()
 
 
@@ -971,17 +1443,50 @@ def WatchDevices():
     while True:
         try:
             if tick == 0:
+                
                 RefreshOutputDevices()
-                current = {d["SystemID"] for d in OutputDevices}
+            
+                for key, device in Devices["A"].items():
+                    if not device:
+                        continue
+                    vol = GetAudioDeviceVolume(device["ID"])
+                    if vol is None:
+                        continue
+                    if vol != device["Volume"] and device["Dominant"]:
+                        subprocess.run([
+                        "pactl",
+                        "set-sink-volume",
+                        device["ID"],
+                        f"{device['Volume']}%"
+                        ])
 
+
+                current =  {device["SystemID"] for device in OutputDevices}
                 if current != LastOutputs:
                     print("Outputs changed")
-                    ApplyOutputs()   # ← you make this
+                    ApplyOutputs() 
                     LastOutputs = current
 
             elif tick == 1:
                 RefreshInputDevices()
-                current = {d["SystemID"] for d in InputDevices}
+
+                for key, device in Devices["M"].items():
+                    if not device:
+                        continue
+                    vol = GetMicrophoneVolume(device["ID"])
+                    if vol is None:
+                        continue
+                    if vol != device["Volume"] and device["Dominant"]:
+                        subprocess.run([
+                        "pactl",
+                        "set-source-volume",
+                        device["ID"],
+                        f"{device['Volume']}%"
+                        ])
+
+
+
+                current = {d["ID"] for d in InputDevices}
 
                 if current != LastInputs:
                     print("Inputs changed")
@@ -989,6 +1494,7 @@ def WatchDevices():
                     LastInputs = current
 
             elif tick == 2:
+                EnforceSinkVolumes()
                 current = set(GetAudioSources())
 
                 if current != LastSources:

@@ -43,6 +43,10 @@ case "$Action" in
         exit 0
     ;;
 
+    SetSinkVolume)
+    pactl set-sink-volume "$2" "$3%"
+    ;;
+
     #------------------------------------------ Aux
     ConnectSinkToAux)
         Sink="$Arg1"
