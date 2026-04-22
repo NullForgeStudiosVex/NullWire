@@ -1423,7 +1423,6 @@ subprocess.run(["./NW.sh", "ClearSinks"])
 LoadConfig()
 Startup()
 RebuildUI()
-time.sleep(1)
 RefreshRoutingUI()
 
 
