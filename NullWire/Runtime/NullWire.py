@@ -244,7 +244,7 @@ def GetAudioSources():
 
     return sources
 
-def GetAudioDeviceVolume(DeviceID):
+def GetAudioDeviceSystemVolume(DeviceID):
     try:
         out = subprocess.check_output(
             ["pactl", "get-sink-volume", DeviceID]
@@ -258,7 +258,7 @@ def GetAudioDeviceVolume(DeviceID):
 
     return 0
 
-def GetMicrophoneVolume(source):
+def GetMicrophoneSystemVolume(source):
     try:
         out = subprocess.check_output(
             ["pactl", "get-source-volume", source]
@@ -271,18 +271,6 @@ def GetMicrophoneVolume(source):
         pass
 
     return 0
-
-def GetSinkVolume(name):
-    try:
-        out = subprocess.check_output(
-            ["pactl", "get-sink-volume", name]
-        ).decode()
-
-        for part in out.split():
-            if "%" in part:
-                return int(part.replace("%", ""))
-    except:
-        return None
 
 def ResolveSinkID(name):
     for d in OutputDevices:
@@ -408,6 +396,8 @@ def AddRoutingObject():
     if not name:
         name = f"Sink {len(Sinks)}"
 
+    name = name + "_NullWire"
+
     new = {
         "Mono": False,
         "Outputs": {f"A{i}": False for i in range(1, 21)},
@@ -423,7 +413,7 @@ def AddRoutingObject():
             "CreateSink",
             name
         ])
-    SaveConfig()
+    SaveConfig()# on creation of new sink? save.
     RefreshRoutingUI()
 
     RoutingEntry.delete(0, tk.END)
@@ -462,7 +452,7 @@ def AddRoutingBlock(name, Sink):
         name,
         ])
 
-        SaveConfig()
+        SaveConfig() #When deleting new sink? save
         RefreshRoutingUI()
 
     Column0 = tk.Frame(Frame)
@@ -485,7 +475,9 @@ def AddRoutingBlock(name, Sink):
 
     InnerFrame.columnconfigure(0, weight=1)
 
-    tk.Label(InnerFrame, text=name, anchor="w")\
+    display_name = name.replace("_NullWire", "")
+
+    tk.Label(InnerFrame, text=display_name, anchor="w")\
     .grid(row=0, column=0, sticky="ew")
 
     volume_frame = tk.Frame(Column0)
@@ -566,11 +558,6 @@ def AddRoutingBlock(name, Sink):
 
         def Toggle(d=device, v=var):
             DeviceData = Devices["A"].get(d)
-            if not DeviceData:
-                v.set(False)
-                Sink["Outputs"][d] = False
-                SaveConfig()
-                return
             DeviceID = DeviceData["ID"]
 
             if v.get():
@@ -888,7 +875,7 @@ def CreateABlock(i):
     start_vol = data.get("Volume") if data else None
 
     if start_vol is None:
-        start_vol = GetAudioDeviceVolume(device_id) if device_id else 100
+        start_vol = GetAudioDeviceSystemVolume(device_id) if device_id else 100
 
     vol_var = tk.StringVar(value=str(start_vol))
 
@@ -1005,6 +992,10 @@ def CreateABlock(i):
     else:
         volume_controls.grid_remove()
 
+    if data:
+        if data["IsSink"]:
+            volume.grid_remove()
+            volume_controls.grid_remove()
 
     # buttons
     btns = tk.Frame(frame)
@@ -1047,7 +1038,7 @@ def CreateMBlock(i):
     start_vol = data.get("Volume") if data else None
 
     if start_vol is None:
-        start_vol = GetMicrophoneVolume(device_id) if device_id else 100
+        start_vol = GetMicrophoneSystemVolume(device_id) if device_id else 100
 
     vol_var = tk.StringVar(value=str(start_vol))
 
@@ -1201,10 +1192,12 @@ def RebuildUI():
 
 def ClearOutput(key):
     Devices["A"][key] = None
+    SaveConfig()
     RebuildUI()
 
 def ClearInput(key):
     Devices["M"][key] = None
+    SaveConfig()
     RebuildUI()
 
 def OpenOutputPopup(targetKey):
@@ -1227,8 +1220,13 @@ def SelectOutputDevice(device, key, Popup):
         "Name": device["UIName"],
         "ID": device["SystemID"],
         "Volume": 100,
-        "Dominant": False
+        "Dominant": False,
+        "IsSink": False
     }
+
+
+    if "_NullWire" in device["SystemID"]:
+        Devices["A"][key]["IsSink"] = True
 
     RebuildUI()
     SaveConfig()
@@ -1278,7 +1276,7 @@ def ApplyOutputs():
 
             device = Devices["A"].get(d)
             if not device:
-                print(f"Audio Device not found for {device['Name']}")
+                print(f"Audio Device not found for {d}")
                 continue
 
             device_id = ResolveSinkID(device["Name"])
@@ -1288,7 +1286,7 @@ def ApplyOutputs():
 
             if device["ID"] != device_id:
                 device["ID"] = device_id
-                SaveConfig()
+
 
             subprocess.run([
                 "./NW.sh",
@@ -1306,12 +1304,13 @@ def ApplyInputs():
 
             device = Devices["M"].get(d)
             if not device:
+                print(f"Mic Device not found for {d}")
                 continue
 
             device_id = ResolveSourceID(device["Name"])
             if device["ID"] != device_id:
                 device["ID"] = device_id
-                SaveConfig()
+
 
             subprocess.run([
                 "./NW.sh",
@@ -1320,57 +1319,103 @@ def ApplyInputs():
                 device_id,
             ])
 
-def GetSinkVolume(sink):
+#---- Volume Control
+
+def GetSinkSystemVolume(name):
+    device_id = ResolveSinkID(name)
+    if not device_id:
+        return None
+
     try:
         out = subprocess.check_output(
-            ["pactl", "get-sink-volume", sink]
+            ["pactl", "get-sink-volume", device_id],
+            stderr=subprocess.DEVNULL
         ).decode()
 
         for part in out.split():
             if "%" in part:
                 return int(part.replace("%", ""))
     except:
-        pass
+        return None
 
     return None
 
-def ApplyDominantVolumes():
-    for name, sink in Sinks.items():
-        if not sink.get("Dominant"):
+
+
+
+
+def ForceSinkVolume():
+    for name, dickt in Sinks.items():
+        if not dickt.get("Dominant"):
             continue
 
-        target = int(sink.get("Volume", 1.0) * 100)
-        current = GetSinkVolume(name)
+        targetvol = int(dickt.get("Volume", 1.0))
 
+        current = GetSinkSystemVolume(name)
         if current is None:
             continue
 
-        # only correct if drifted (prevents spam)
-        if abs(current - target) > 2:
-            subprocess.run([
-                "pactl", "set-sink-volume",
-                name,
-                f"{target}%"
-            ])
-
-def EnforceSinkVolumes():
-    for name, sink in Sinks.items():
-        target = sink.get("Volume")
-        if target is None:
-            continue
-
-        current = GetSinkVolume(name)
-        if current is None:
-            continue
-
-        if abs(current - target) > 2:
-            print(f"Fixing volume for {name}: {current} → {target}")
-
+        if abs(current - targetvol) > 2:
             subprocess.run([
                 "./NW.sh",
                 "SetSinkVolume",
                 name,
-                str(target)
+                str(targetvol)
+            ])
+
+def ForceAudioDeviceVolume():
+    for devicenumber in Devices["A"].values():
+
+        if devicenumber == None:
+            continue
+        
+        if not devicenumber.get("Dominant"):
+            continue
+        
+        
+        target = int(devicenumber.get("Volume", 100))
+
+        device_id = ResolveSinkID(devicenumber["Name"])
+        if not device_id:
+            continue
+
+        current = GetAudioDeviceSystemVolume(device_id)
+        if current is None:
+            continue
+
+        if abs(current - target) > 2:
+            subprocess.run([
+                "pactl",
+                "set-sink-volume",
+                device_id,
+                f"{target}%"
+            ])
+
+def ForceMicDeviceVolume():
+    for devicenumber in Devices["M"].values():
+
+        if devicenumber == None:
+            continue
+
+        if not devicenumber.get("Dominant"):
+            continue
+
+        target = int(devicenumber.get("Volume", 100))
+
+        device_id = ResolveSourceID(devicenumber["Name"])
+        if not device_id:
+            continue
+
+        current = GetMicrophoneSystemVolume(device_id)
+        if current is None:
+            continue
+
+        if abs(current - target) > 2:
+            subprocess.run([
+                "pactl",
+                "set-source-volume",
+                device_id,
+                f"{target}%"
             ])
 
 # ==============================
@@ -1441,25 +1486,10 @@ def WatchDevices():
 
     while True:
         try:
+
             if tick == 0:
-                
                 RefreshOutputDevices()
-            
-                for key, device in Devices["A"].items():
-                    if not device:
-                        continue
-                    vol = GetAudioDeviceVolume(device["ID"])
-                    if vol is None:
-                        continue
-                    if vol != device["Volume"] and device["Dominant"]:
-                        subprocess.run([
-                        "pactl",
-                        "set-sink-volume",
-                        device["ID"],
-                        f"{device['Volume']}%"
-                        ])
-
-
+                ForceAudioDeviceVolume()
                 current =  {device["SystemID"] for device in OutputDevices}
                 if current != LastOutputs:
                     print("Outputs changed")
@@ -1468,11 +1498,11 @@ def WatchDevices():
 
             elif tick == 1:
                 RefreshInputDevices()
-
+                ForceMicDeviceVolume()
                 for key, device in Devices["M"].items():
                     if not device:
                         continue
-                    vol = GetMicrophoneVolume(device["ID"])
+                    vol = GetMicrophoneSystemVolume(device["ID"])
                     if vol is None:
                         continue
                     if vol != device["Volume"] and device["Dominant"]:
@@ -1493,7 +1523,7 @@ def WatchDevices():
                     LastInputs = current
 
             elif tick == 2:
-                EnforceSinkVolumes()
+                ForceSinkVolume()
                 current = set(GetAudioSources())
 
                 if current != LastSources:
