@@ -1502,9 +1502,9 @@ RefreshRoutingUI()
 def WatchDevices():
     global LastOutputs, LastInputs, LastSources
 
-    LastOutputs = []
-    LastInputs = []
-    LastSources = []
+    LastOutputs = set()
+    LastInputs = set()
+    LastSources = set()
 
     tick = 0
 
@@ -1517,7 +1517,7 @@ def WatchDevices():
                 if OutputDevices != LastOutputs:
                     print("Outputs changed")
                     ApplyOutputs() 
-                    LastOutputs = OutputDevices
+                    LastOutputs = OutputDevices.copy()
                 ForceAudioDeviceVolume()
 
             elif tick == 1:
@@ -1525,7 +1525,7 @@ def WatchDevices():
                 if InputDevices != LastInputs:
                     print("Inputs changed")
                     ApplyInputs()
-                    LastInputs = InputDevices
+                    LastInputs = InputDevices.copy()
                 ForceMicDeviceVolume()
 
             elif tick == 2:
@@ -1533,7 +1533,7 @@ def WatchDevices():
                 if AudioSources != LastSources:
                     print("Sources changed")
                     ApplySources()
-                    LastSources = AudioSources
+                    LastSources = AudioSources.copy()
                 ForceSinkVolume()
 
             tick = (tick + 1) % 3
