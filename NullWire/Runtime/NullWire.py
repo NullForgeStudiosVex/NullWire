@@ -113,7 +113,10 @@ Devices = {
 }
 
 OutputDevices = []
+OutputDeviceSelection = []
 InputDevices = []
+InputDeviceSelection = []
+AudioSources = []
 
 IgnoreSources = [
     "speech-dispatcher",
@@ -161,11 +164,6 @@ def RefreshOutputDevices():
     except:
         OutputDevices = []
         return
-    
-    used_ids = set()
-    for slot in Devices["A"].values():
-        if slot and "ID" in slot:
-            used_ids.add(slot["ID"])
 
     devices = []
     current = {}
@@ -180,12 +178,25 @@ def RefreshOutputDevices():
             current["UIName"] = line.split(":", 1)[1].strip()
 
             if "SystemID" in current:
-                #if current["SystemID"] not in Sinks:
-                if current["SystemID"] not in used_ids:
-                    devices.append(current)
+                devices.append(current)
                 current = {}
 
     OutputDevices = devices
+
+def BuildOutputSelectionList():
+    used_ids = set()
+
+    for slot in Devices["A"].values():
+        if slot and "ID" in slot:
+            used_ids.add(slot["ID"])
+
+    selection = []
+
+    for device in OutputDevices:
+        if device["SystemID"] not in used_ids:
+            selection.append(device)
+
+    return selection
 
 def RefreshInputDevices():
     global InputDevices
@@ -195,11 +206,6 @@ def RefreshInputDevices():
     except:
         InputDevices = []
         return
-    
-    used_ids = set()
-    for slot in Devices["M"].values():
-        if slot and "ID" in slot:
-            used_ids.add(slot["ID"])
 
     devices = []
     current = {}
@@ -214,13 +220,30 @@ def RefreshInputDevices():
             current["UIName"] = line.split(":", 1)[1].strip()
 
             if "SystemID" in current:
-                if ".monitor" not in current["SystemID"] and current["SystemID"] not in used_ids:
+                if ".monitor" not in current["SystemID"]:  # keep this
                     devices.append(current)
                 current = {}
 
     InputDevices = devices
 
+def BuildInputSelectionList():
+    used_ids = set()
+
+    for slot in Devices["M"].values():
+        if slot and "ID" in slot:
+            used_ids.add(slot["ID"])
+
+    selection = []
+
+    for device in InputDevices:
+        if device["SystemID"] not in used_ids:
+            selection.append(device)
+
+    return selection
+
+
 def GetAudioSources():
+    global AudioSources
     try:
         out = subprocess.check_output(
             ["pactl", "list", "sink-inputs"]
@@ -242,6 +265,7 @@ def GetAudioSources():
             if name not in sources:
                 sources.append(name)
 
+    AudioSources = sources
     return sources
 
 def GetAudioDeviceSystemVolume(DeviceID):
@@ -1201,14 +1225,14 @@ def ClearInput(key):
     RebuildUI()
 
 def OpenOutputPopup(targetKey):
-    RefreshOutputDevices()
+    BuildOutputSelectionList()
 
     Popup = tk.Toplevel(Root)
     Popup.title("Select Output Device")
     Popup.geometry("400x500")
     Popup.grab_set()
 
-    for device in OutputDevices:
+    for device in OutputDeviceSelection:
         tk.Button(
             Popup,
             text=device["UIName"],
@@ -1233,14 +1257,14 @@ def SelectOutputDevice(device, key, Popup):
     Popup.destroy()
 
 def OpenInputPopup(targetKey):
-    RefreshInputDevices()
+    BuildInputSelectionList()
 
     Popup = tk.Toplevel(Root)
     Popup.title("Select Input Device")
     Popup.geometry("400x500")
     Popup.grab_set()
 
-    for device in InputDevices:
+    for device in InputDeviceSelection:
         tk.Button(
             Popup,
             text=device["UIName"],
@@ -1478,58 +1502,39 @@ RefreshRoutingUI()
 def WatchDevices():
     global LastOutputs, LastInputs, LastSources
 
-    LastOutputs = set()
-    LastInputs = set()
-    LastSources = set()
+    LastOutputs = []
+    LastInputs = []
+    LastSources = []
 
     tick = 0
 
     while True:
+
         try:
 
             if tick == 0:
                 RefreshOutputDevices()
-                ForceAudioDeviceVolume()
-                current =  {device["SystemID"] for device in OutputDevices}
-                if current != LastOutputs:
+                if OutputDevices != LastOutputs:
                     print("Outputs changed")
                     ApplyOutputs() 
-                    LastOutputs = current
+                    LastOutputs = OutputDevices
+                ForceAudioDeviceVolume()
 
             elif tick == 1:
                 RefreshInputDevices()
-                ForceMicDeviceVolume()
-                for key, device in Devices["M"].items():
-                    if not device:
-                        continue
-                    vol = GetMicrophoneSystemVolume(device["ID"])
-                    if vol is None:
-                        continue
-                    if vol != device["Volume"] and device["Dominant"]:
-                        subprocess.run([
-                        "pactl",
-                        "set-source-volume",
-                        device["ID"],
-                        f"{device['Volume']}%"
-                        ])
-
-
-
-                current = {d["ID"] for d in InputDevices}
-
-                if current != LastInputs:
+                if InputDevices != LastInputs:
                     print("Inputs changed")
                     ApplyInputs()
-                    LastInputs = current
+                    LastInputs = InputDevices
+                ForceMicDeviceVolume()
 
             elif tick == 2:
-                ForceSinkVolume()
-                current = set(GetAudioSources())
-
-                if current != LastSources:
+                GetAudioSources()
+                if AudioSources != LastSources:
                     print("Sources changed")
                     ApplySources()
-                    LastSources = current
+                    LastSources = AudioSources
+                ForceSinkVolume()
 
             tick = (tick + 1) % 3
             time.sleep(1)
