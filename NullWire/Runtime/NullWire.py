@@ -9,6 +9,7 @@ import setproctitle
 import json
 import os
 import time
+import webbrowser
 
 
 # ==============================
@@ -360,41 +361,24 @@ class ScrollableFrame(tk.Frame):
 #-----------------------------------------Main
 ActiveColor = "darkgray"
 InactiveColor = "lightgray"
+#-----------------------------------------Main
 Main = tk.Frame(Root)
-Main.pack(fill="both", expand=True, padx=10, pady= 10)
-TabBar = tk.Frame(Main)
-TabBar.pack(fill="x")
-PageContainer = tk.Frame(Main)
-PageContainer.pack(fill="both", expand=True)
-RoutingPage = tk.Frame(PageContainer)
-DevicesPage = tk.Frame(PageContainer)
-for Page in (RoutingPage, DevicesPage):
-    Page.place(relwidth=1, relheight=1)
+Main.pack(fill="both", expand=True, padx=10, pady=10)
 
-def Show(Page):
-    Page.lift()
+Notebook = ttk.Notebook(Main)
+Notebook.pack(fill="both", expand=True)
 
-    # reset all tabs
-    RoutingTab.config(bg=InactiveColor)
-    DevicesTab.config(bg=InactiveColor)
+RoutingPage = tk.Frame(Notebook)
+DevicesPage = tk.Frame(Notebook)
+HowTo = tk.Frame(Notebook)
+About = tk.Frame(Notebook)
 
-    # activate correct one
-    if Page == RoutingPage:
-        RoutingTab.config(bg=ActiveColor)
-    elif Page == DevicesPage:
-        DevicesTab.config(bg=ActiveColor)
-
-RoutingTab = tk.Button(TabBar, text="Routing")
-DevicesTab = tk.Button(TabBar, text="Devices")
-RoutingTab.pack(side="left", fill="x", expand=True)
-DevicesTab.pack(side="left", fill="both", expand=True)
-RoutingTab.config(command=lambda: Show(RoutingPage))
-DevicesTab.config(command=lambda: Show(DevicesPage))
-Show(RoutingPage)
+Notebook.add(RoutingPage, text="Wires")
+Notebook.add(DevicesPage, text="Devices")
+Notebook.add(HowTo, text = "How To")
+Notebook.add(About, text = "About")
 
 #-------------------------------- Routing Page
-Separator = tk.Frame(RoutingPage, height=2, bg="#555555")
-Separator.pack(fill="x", pady=5)
 RoutingTop = tk.Frame(RoutingPage)
 RoutingTop.pack(fill="x")
 RoutingEntry = tk.Entry(RoutingTop)
@@ -844,9 +828,6 @@ def RefreshRoutingUI():
 
 #-------------------------------- Devices Page
 
-Divider = tk.Frame(DevicesPage, height=2, bg="#555")
-Divider.pack(fill="x", pady=5)
-
 MainRow = tk.Frame(DevicesPage)
 MainRow.pack(fill="both", expand=True)
 
@@ -1281,6 +1262,60 @@ def SelectInputDevice(device, key, Popup):
     SaveConfig()
     RebuildUI()
     Popup.destroy()
+
+#---------------------------- How To Page
+
+MainRowHT = tk.Frame(HowTo)
+MainRowHT.pack(fill="both",pady=20)
+
+HowToUse = tk.Label(MainRowHT, 
+text = "Step 1. In the Devices Page. Go to A1. Click \"Set\", and Select your Audio Output Device. It does not have to be your default device.\n\n" \
+"Step 2. Now in Wires Page. In the white long box. Type a name, and then click \"Add\".\n\n"\
+"Step 3. You now have a routing wire. Click on the A1 toggle inside the box. This allows audio to go from the Wire, into your Audio Device.\n\n"\
+"Step 4. Within your wire, there is \"Attach\" and \"Remove\" boxes. Have audio be playing (e.g. spotify, or a youtube video or something). Click attach, and then select that Audio Source.\n\n"\
+"Step 5. Now that your Audio source is connected. It will go into your wire, and then pass through to your Audio Device.\n\n"\
+"Step 6? If you're using NullWire for streaming. Wires will show up as an Audio Output. So you may now attach your wire into OBS, and if you don't wish to also hear it? Uncheck the A1 box.\n\n"\
+"Bonus: Feel free to mess around with settings and such. However, for equalization, and other special effects. I recommend EasyEffects"
+    )
+HowToUse.pack(fill="both")
+
+#---------------------------- About Page
+
+MainRowAbout = tk.Frame(About)
+MainRowAbout.pack(fill="both", expand=True)
+
+AboutNullWire = tk.Label(MainRowAbout, 
+text = "Sup demons, it's me ya boi. \n\n"\
+"I used to have my own little script/program thing that just ran in Bash, but it was finnicky, did just enough of what it needed too, so that's what I used. \n"\
+"Now I have friends on Linux (Mint specifically). So, I said fuck it. Made this little program that apes Virtual Audio Cable/VoiceMeter. \n"\
+"Sadly I won't be making this run on the bajillion distros of Linux, unless it gets some serious funding, otherwise i'll be working on other things.\n\n"\
+"As for funding, that can be done Here:"
+)
+AboutNullWire.pack(fill="x")
+
+link = tk.Label(
+    MainRowAbout,
+    text="Our Ko-fi",
+    fg="blue", cursor="hand2",
+)
+link.pack(fill="x")
+
+
+link.bind("<Button-1>", lambda e: webbrowser.open_new("https://ko-fi.com/nullforgestudios"))
+
+lol = tk.Label(MainRowAbout, 
+text = ""
+)
+lol.pack(fill="both",expand=True)
+
+VersionLink = tk.Label(
+    MainRowAbout,
+    text="Version 2.3",
+    fg="blue", cursor="hand2",
+    anchor="se"
+)
+VersionLink.pack(fill="x")
+VersionLink.bind("<Button-1>", lambda e: webbrowser.open_new("https://github.com/NullForgeStudiosVex/NullWire"))
 
 
 #------------------------------------------- Heartbeat
